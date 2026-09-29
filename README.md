@@ -14,14 +14,14 @@ The model sees a system instruction that treats ticket text as data. It cannot s
 
 ## Concepts and choices
 
-FastAPI supplies an explicit HTTP contract; Pydantic supplies schema enforcement; the official OpenAI SDK supplies structured output. SQLite makes the example runnable without infrastructure. The extractor is injected into `create_app`, so tests exercise the HTTP behavior without billing an API. The source lives in `app.py`; the API tests live in `../tests/test_portfolio.py`.
+FastAPI supplies an explicit HTTP contract; Pydantic supplies schema enforcement; the official OpenAI SDK supplies structured output. SQLite makes the example runnable without infrastructure. The extractor is injected into `create_app`, so tests exercise the HTTP behavior without billing an API. The source lives in `app.py`; the API tests live in `tests/test_app.py`.
 
 ## Run and example
 
-From `portfolio`, install the dependencies in the parent README. Set `OPENAI_API_KEY` and optionally `PORTFOLIO_API_KEY`, then run:
+Install with `python -m pip install -e ".[dev]"`. Set `OPENAI_API_KEY` and optionally `PORTFOLIO_API_KEY`, then run:
 
 ```bash
-python -m uvicorn 01_extraction_api.app:app --port 8001
+python -m uvicorn extraction_api.app:app --port 8001
 curl -X POST localhost:8001/extract -H 'content-type: application/json' \
   -H 'idempotency-key: example-001' -H 'x-api-key: change-me-for-local-demo' \
   -d '{"text":"I have been unable to log in since yesterday and need help."}'
@@ -36,3 +36,7 @@ The database transaction remains open during the network request, which keeps th
 ## Interview preparation
 
 Explain why idempotency keys are tied to payload hashes, why only transient failures are retried, how schema validation differs from semantic correctness, and how you would prevent duplicate work across multiple replicas.
+
+## Verify
+
+Run `python -m pytest -q` and `python -m ruff check .` from this repository.

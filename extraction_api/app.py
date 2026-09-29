@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException
-from openai import OpenAI, RateLimitError, APITimeoutError, APIConnectionError
+from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field
 
 
