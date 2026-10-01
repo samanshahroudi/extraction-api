@@ -68,7 +68,7 @@ def create_app(extractor: Callable[[str], Ticket] = extract_live, db_path: str |
         return {"status": "ok"}
 
     @app.post("/extract", response_model=Ticket)
-    def extract(request: Request, idempotency_key: str = Header(min_length=8, max_length=128),
+    def extract(request: Request, idempotency_key: str = Header(min_length=8, max_length=128, pattern=r"\S"),
                 x_api_key: str | None = Header(default=None)) -> Ticket:
         expected = os.getenv("PORTFOLIO_API_KEY")
         if expected and x_api_key != expected:

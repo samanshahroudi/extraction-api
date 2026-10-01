@@ -62,3 +62,22 @@ def test_blank_text_is_rejected_before_extraction(tmp_path, monkeypatch):
     text = "  Cannot log into my account  "
     assert client.post("/extract", headers=headers, json={"text": text}).status_code == 200
     assert calls == [text]
+
+
+def test_blank_idempotency_key_is_rejected_before_extraction(tmp_path, monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_API_KEY", raising=False)
+    calls = []
+
+    def fake(text):
+        calls.append(text)
+        return Ticket(category="technical", urgency=3, summary="Cannot log in", needs_human=True)
+
+    client = TestClient(create_app(fake, str(tmp_path / "extract.db")))
+    payload = {"text": "Cannot log into my account"}
+    for key in [" " * 8, "\t" * 8]:
+        response = client.post("/extract", headers={"idempotency-key": key}, json=payload)
+        assert response.status_code == 422
+    assert calls == []
+    assert client.post("/extract", headers={"idempotency-key": "request-123"},
+                       json=payload).status_code == 200
+    assert calls == [payload["text"]]
