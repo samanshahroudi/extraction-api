@@ -43,3 +43,22 @@ def test_failed_extraction_can_retry_same_key(tmp_path, monkeypatch):
     assert cached.json() == recovered.json()
     assert cached.status_code == 200
     assert len(calls) == 2
+
+
+def test_blank_text_is_rejected_before_extraction(tmp_path, monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_API_KEY", raising=False)
+    calls = []
+
+    def fake(text):
+        calls.append(text)
+        return Ticket(category="other", urgency=1, summary="No useful content", needs_human=True)
+
+    client = TestClient(create_app(fake, str(tmp_path / "extract.db")))
+    headers = {"idempotency-key": "blank-request"}
+    for text in [" " * 10, " \t\n" * 4]:
+        assert client.post("/extract", headers=headers, json={"text": text}).status_code == 422
+    assert calls == []
+    # Validation must not reserve the key; preserve meaningful surrounding whitespace.
+    text = "  Cannot log into my account  "
+    assert client.post("/extract", headers=headers, json={"text": text}).status_code == 200
+    assert calls == [text]
