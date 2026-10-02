@@ -1,6 +1,12 @@
-from fastapi.testclient import TestClient
+from types import SimpleNamespace
+from unittest.mock import Mock
 
-from extraction_api.app import Ticket, create_app
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+from openai import APIConnectionError, APITimeoutError, RateLimitError
+
+from extraction_api.app import Ticket, create_app, extract_live
 
 
 def test_idempotency_and_conflict(tmp_path, monkeypatch):
@@ -81,3 +87,44 @@ def test_blank_idempotency_key_is_rejected_before_extraction(tmp_path, monkeypat
     assert client.post("/extract", headers={"idempotency-key": "request-123"},
                        json=payload).status_code == 200
     assert calls == [payload["text"]]
+
+
+@pytest.mark.parametrize("error_type", [APIConnectionError, APITimeoutError, RateLimitError])
+@pytest.mark.parametrize("recover", [False, True])
+def test_live_extraction_retries_are_bounded(monkeypatch, error_type, recover):
+    request = httpx.Request("POST", "https://provider.example.test/responses")
+    if error_type is RateLimitError:
+        error = error_type("rate limited", response=httpx.Response(429, request=request), body=None)
+    else:
+        error = error_type(request=request)
+    ticket = Ticket(category="technical", urgency=3, summary="Cannot log in", needs_human=True)
+    client = Mock()
+    client.responses.parse.side_effect = [error, error, SimpleNamespace(output_parsed=ticket)
+                                         if recover else error]
+    factory = Mock(return_value=client)
+    delays = []
+    monkeypatch.setattr("extraction_api.app.OpenAI", factory)
+    monkeypatch.setattr("extraction_api.app.time.sleep", delays.append)
+    if recover:
+        assert extract_live("Cannot log into my account") == ticket
+    else:
+        with pytest.raises(RuntimeError, match="temporarily unavailable") as exc:
+            extract_live("Cannot log into my account")
+        assert exc.value.__cause__ is error
+    factory.assert_called_once_with(timeout=15, max_retries=0)
+    assert client.responses.parse.call_count == 3
+    assert delays == [0.25, 0.5]
+
+
+@pytest.mark.parametrize("outcome", [ValueError("invalid provider output"),
+                                     SimpleNamespace(output_parsed=None)])
+def test_live_extraction_does_not_retry_invalid_output(monkeypatch, outcome):
+    client = Mock()
+    client.responses.parse.side_effect = [outcome]
+    monkeypatch.setattr("extraction_api.app.OpenAI", Mock(return_value=client))
+    delays = []
+    monkeypatch.setattr("extraction_api.app.time.sleep", delays.append)
+    with pytest.raises(ValueError):
+        extract_live("Cannot log into my account")
+    assert client.responses.parse.call_count == 1
+    assert delays == []
