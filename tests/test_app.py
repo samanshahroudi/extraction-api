@@ -9,6 +9,18 @@ from openai import APIConnectionError, APITimeoutError, RateLimitError
 from extraction_api.app import Ticket, create_app, extract_live
 
 
+@pytest.mark.parametrize("summary", [" " * 5, " \t\n  "])
+def test_ticket_summary_requires_content(summary):
+    with pytest.raises(ValueError, match="summary cannot be blank"):
+        Ticket(category="other", urgency=1, summary=summary, needs_human=True)
+
+
+def test_ticket_summary_preserves_meaningful_whitespace():
+    ticket = Ticket(category="technical", urgency=3,
+                    summary="  Cannot log in  ", needs_human=True)
+    assert ticket.summary == "  Cannot log in  "
+
+
 def test_idempotency_and_conflict(tmp_path, monkeypatch):
     monkeypatch.setenv("PORTFOLIO_API_KEY", "demo")
     calls = []

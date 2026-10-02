@@ -19,6 +19,13 @@ class Ticket(BaseModel):
     summary: str = Field(min_length=5, max_length=300)
     needs_human: bool
 
+    @field_validator("summary")
+    @classmethod
+    def require_summary(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("ticket summary cannot be blank")
+        return value
+
 
 class Request(BaseModel):
     text: str = Field(min_length=10, max_length=10000)
