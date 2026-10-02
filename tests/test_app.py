@@ -1,3 +1,6 @@
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -61,6 +64,38 @@ def test_failed_extraction_can_retry_same_key(tmp_path, monkeypatch):
     assert cached.json() == recovered.json()
     assert cached.status_code == 200
     assert len(calls) == 2
+
+
+def test_concurrent_duplicate_requests_extract_and_persist_once(tmp_path, monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_API_KEY", raising=False)
+    calls = []
+    ticket = Ticket(category="technical", urgency=3, summary="Cannot log in", needs_human=True)
+
+    def fake(text):
+        calls.append(text)
+        return ticket
+
+    path = tmp_path / "extract.db"
+    client = TestClient(create_app(fake, str(path)))
+    ready = Barrier(2)
+    payload = {"text": "Cannot log into my account"}
+
+    def request():
+        ready.wait(timeout=5)
+        return client.post("/extract", headers={"idempotency-key": "concurrent-request"},
+                           json=payload)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(request) for _ in range(2)]
+        responses = [future.result(timeout=15) for future in futures]
+    assert [response.status_code for response in responses] == [200, 200]
+    assert [response.json() for response in responses] == [ticket.model_dump()] * 2
+    assert calls == [payload["text"]]
+    with sqlite3.connect(path) as db:
+        rows = db.execute("SELECT key,result FROM requests").fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == "concurrent-request"
+    assert Ticket.model_validate_json(rows[0][1]) == ticket
 
 
 def test_blank_text_is_rejected_before_extraction(tmp_path, monkeypatch):
