@@ -220,3 +220,22 @@ def test_cached_extraction_survives_app_restart(tmp_path, monkeypatch):
         conflict = restarted.post("/extract", headers=headers,
                                   json={"text": "Different request body"})
         assert conflict.status_code == 409
+
+
+def test_invalid_extractor_result_is_not_cached(tmp_path, monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_API_KEY", raising=False)
+    path = tmp_path / "extract.db"
+    valid = Ticket(category="technical", urgency=3, summary="Cannot log in", needs_human=True)
+    invalid = valid.model_copy(update={"urgency": 99})
+    extractor = Mock(side_effect=[invalid, valid])
+    client = TestClient(create_app(extractor, str(path)), raise_server_exceptions=False)
+    headers = {"idempotency-key": "invalid-output"}
+    payload = {"text": "Cannot log into my account"}
+    response = client.post("/extract", headers=headers, json=payload)
+    assert response.status_code == 503
+    assert response.json() == {"detail": "extraction unavailable"}
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 0
+    assert client.post("/extract", headers=headers, json=payload).json() == valid.model_dump()
+    assert client.post("/extract", headers=headers, json=payload).json() == valid.model_dump()
+    assert extractor.call_count == 2

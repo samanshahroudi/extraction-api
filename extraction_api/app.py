@@ -95,7 +95,7 @@ def create_app(extractor: Callable[[str], Ticket] = extract_live, db_path: str |
                     raise HTTPException(409, "idempotency key reused for a different request")
                 return Ticket.model_validate_json(row[1])
             try:
-                result = extractor(request.text)
+                result = Ticket.model_validate(extractor(request.text).model_dump())
             except Exception as exc:
                 raise HTTPException(503, "extraction unavailable") from exc
             db.execute("INSERT INTO requests VALUES (?,?,?)", (idempotency_key, digest, result.model_dump_json()))
