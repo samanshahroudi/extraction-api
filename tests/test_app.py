@@ -12,6 +12,30 @@ from openai import APIConnectionError, APITimeoutError, RateLimitError
 from extraction_api.app import Ticket, create_app, extract_live
 
 
+def test_database_contention_is_retryable_without_extraction(tmp_path, monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_API_KEY", raising=False)
+    path = tmp_path / "extract.db"
+    ticket = Ticket(category="technical", urgency=3, summary="Cannot log in", needs_human=True)
+    extractor = Mock(return_value=ticket)
+    client = TestClient(create_app(extractor, str(path)), raise_server_exceptions=False)
+    connect = sqlite3.connect
+    # Exercise a real SQLite lock without waiting for the production timeout.
+    monkeypatch.setattr("extraction_api.app.sqlite3.connect",
+                        lambda *args, **kwargs: connect(*args, **{**kwargs, "timeout": 0}))
+    headers = {"idempotency-key": "contended-request"}
+    payload = {"text": "Cannot log into my account"}
+    with connect(path) as blocker:
+        blocker.execute("BEGIN IMMEDIATE")
+        response = client.post("/extract", headers=headers, json=payload)
+        assert response.status_code == 503
+        assert response.json() == {"detail": "database temporarily busy"}
+        assert response.headers["retry-after"] == "1"
+        extractor.assert_not_called()
+    assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
+    assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
+    extractor.assert_called_once_with(payload["text"])
+
+
 @pytest.mark.parametrize("summary", [" " * 5, " \t\n  "])
 def test_ticket_summary_requires_content(summary):
     with pytest.raises(ValueError, match="summary cannot be blank"):

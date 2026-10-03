@@ -82,7 +82,13 @@ def create_app(extractor: Callable[[str], Ticket] = extract_live, db_path: str |
             raise HTTPException(401, "invalid API key")
         digest = hashlib.sha256(request.text.encode()).hexdigest()
         with sqlite3.connect(path, timeout=10) as db:
-            db.execute("BEGIN IMMEDIATE")
+            try:
+                db.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError as exc:
+                if exc.sqlite_errorcode & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+                    raise HTTPException(503, "database temporarily busy",
+                                        headers={"Retry-After": "1"}) from exc
+                raise
             row = db.execute("SELECT digest,result FROM requests WHERE key=?", (idempotency_key,)).fetchone()
             if row:
                 if row[0] != digest:

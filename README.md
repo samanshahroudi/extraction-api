@@ -29,6 +29,8 @@ curl -X POST localhost:8001/extract -H 'content-type: application/json' \
 
 Use the same key and body to see the cached result. Use the same key and different body to see HTTP 409. `PORTFOLIO_DB` controls the database location.
 
+If SQLite cannot acquire the write lock within its timeout, the API returns HTTP 503 with `Retry-After: 1`. Retry with the same key and body; the extractor has not been called for that request.
+
 ## Trade-offs, limitations, and next production steps
 
 The database transaction remains open during the network request, which keeps the code simple but limits write concurrency. For higher throughput, reserve a request row first, execute outside the transaction, and use a lease plus recovery worker. API-key comparison should become a real authentication layer with per-tenant quotas. Add request IDs, metrics, redacted traces, explicit cost accounting, and migration tooling. Structured output validates shape; it does not prove the classification is correct. Build a labeled extraction set and track errors by category before release.
