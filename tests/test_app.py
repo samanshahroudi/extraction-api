@@ -175,3 +175,24 @@ def test_live_extraction_does_not_retry_invalid_output(monkeypatch, outcome):
         extract_live("Cannot log into my account")
     assert client.responses.parse.call_count == 1
     assert delays == []
+
+
+def test_cached_extraction_survives_app_restart(tmp_path, monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_API_KEY", raising=False)
+    path = str(tmp_path / "extract.db")
+    ticket = Ticket(category="technical", urgency=3, summary="Cannot log in", needs_human=True)
+    headers = {"idempotency-key": "durable-request"}
+    payload = {"text": "Cannot log into my account"}
+    with TestClient(create_app(lambda text: ticket, path)) as client:
+        assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
+
+    def unavailable(text):
+        pytest.fail("persisted requests must not call the extractor after restart")
+
+    with TestClient(create_app(unavailable, path)) as restarted:
+        cached = restarted.post("/extract", headers=headers, json=payload)
+        assert cached.status_code == 200
+        assert cached.json() == ticket.model_dump()
+        conflict = restarted.post("/extract", headers=headers,
+                                  json={"text": "Different request body"})
+        assert conflict.status_code == 409
