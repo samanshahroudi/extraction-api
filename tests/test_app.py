@@ -239,3 +239,23 @@ def test_invalid_extractor_result_is_not_cached(tmp_path, monkeypatch):
     assert client.post("/extract", headers=headers, json=payload).json() == valid.model_dump()
     assert client.post("/extract", headers=headers, json=payload).json() == valid.model_dump()
     assert extractor.call_count == 2
+
+
+@pytest.mark.parametrize("supplied", [None, "wrong-key", "demo-key-extra", "demo-ke"])
+def test_invalid_api_key_does_not_extract_or_reserve_key(tmp_path, monkeypatch, supplied):
+    monkeypatch.setenv("PORTFOLIO_API_KEY", "demo-key")
+    ticket = Ticket(category="other", urgency=1, summary="Support requested", needs_human=True)
+    extractor = Mock(return_value=ticket)
+    path = tmp_path / "extract.db"
+    client = TestClient(create_app(extractor, str(path)))
+    headers = {"idempotency-key": "auth-request"}
+    if supplied is not None:
+        headers["x-api-key"] = supplied
+    payload = {"text": "Please help with my account"}
+    assert client.post("/extract", headers=headers, json=payload).status_code == 401
+    extractor.assert_not_called()
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 0
+    headers["x-api-key"] = "demo-key"
+    assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
+    extractor.assert_called_once()

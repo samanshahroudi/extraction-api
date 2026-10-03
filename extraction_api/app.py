@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import secrets
 import sqlite3
 import time
 from collections.abc import Callable
@@ -78,7 +79,8 @@ def create_app(extractor: Callable[[str], Ticket] = extract_live, db_path: str |
     def extract(request: Request, idempotency_key: str = Header(min_length=8, max_length=128, pattern=r"\S"),
                 x_api_key: str | None = Header(default=None)) -> Ticket:
         expected = os.getenv("PORTFOLIO_API_KEY")
-        if expected and x_api_key != expected:
+        if expected and (x_api_key is None or not secrets.compare_digest(
+                x_api_key.encode(), expected.encode())):
             raise HTTPException(401, "invalid API key")
         digest = hashlib.sha256(request.text.encode()).hexdigest()
         with sqlite3.connect(path, timeout=10) as db:
