@@ -285,3 +285,33 @@ def test_commit_contention_is_retryable_and_rolls_back(tmp_path, monkeypatch):
     assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
     assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
     assert extractor.call_count == 2
+
+
+def test_connections_close_after_success_cache_conflict_and_failure(tmp_path, monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_API_KEY", raising=False)
+    connections = []
+    connect = sqlite3.connect
+
+    def track_connection(*args, **kwargs):
+        # Retain worker-thread connections to inspect their lifetime from the test thread.
+        connection = connect(*args, **{**kwargs, "check_same_thread": False})
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", track_connection)
+    ticket = Ticket(category="technical", urgency=3, summary="Cannot log in", needs_human=True)
+    extractor = Mock(side_effect=[ticket, RuntimeError("provider unavailable")])
+    client = TestClient(create_app(extractor, str(tmp_path / "extract.db")))
+    payload = {"text": "Cannot log into my account"}
+    headers = {"idempotency-key": "connection-test"}
+    assert client.post("/extract", headers=headers, json=payload).status_code == 200
+    assert client.post("/extract", headers=headers, json=payload).status_code == 200
+    assert client.post("/extract", headers=headers,
+                       json={"text": "Different request body"}).status_code == 409
+    assert client.post("/extract", headers={"idempotency-key": "failed-request"},
+                       json=payload).status_code == 503
+    assert extractor.call_count == 2
+    assert connections
+    for connection in connections:
+        with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+            connection.execute("SELECT 1")

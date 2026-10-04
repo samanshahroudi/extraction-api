@@ -7,6 +7,7 @@ import secrets
 import sqlite3
 import time
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException
@@ -68,7 +69,7 @@ def create_app(extractor: Callable[[str], Ticket] = extract_live, db_path: str |
     app = FastAPI(title="Support ticket extraction")
     path = db_path or os.getenv("PORTFOLIO_DB", "extraction.db")
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db, db:
         db.execute("CREATE TABLE IF NOT EXISTS requests (key TEXT PRIMARY KEY, digest TEXT NOT NULL, result TEXT NOT NULL)")
 
     @app.get("/health")
@@ -84,7 +85,7 @@ def create_app(extractor: Callable[[str], Ticket] = extract_live, db_path: str |
             raise HTTPException(401, "invalid API key")
         digest = hashlib.sha256(request.text.encode()).hexdigest()
         try:
-            with sqlite3.connect(path, timeout=10) as db:
+            with closing(sqlite3.connect(path, timeout=10)) as db, db:
                 db.execute("BEGIN IMMEDIATE")
                 row = db.execute("SELECT digest,result FROM requests WHERE key=?", (idempotency_key,)).fetchone()
                 if row:
