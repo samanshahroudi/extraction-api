@@ -259,3 +259,29 @@ def test_invalid_api_key_does_not_extract_or_reserve_key(tmp_path, monkeypatch, 
     headers["x-api-key"] = "demo-key"
     assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
     extractor.assert_called_once()
+
+
+def test_commit_contention_is_retryable_and_rolls_back(tmp_path, monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_API_KEY", raising=False)
+    path = tmp_path / "extract.db"
+    ticket = Ticket(category="technical", urgency=3, summary="Cannot log in", needs_human=True)
+    extractor = Mock(return_value=ticket)
+    client = TestClient(create_app(extractor, str(path)), raise_server_exceptions=False)
+    connect = sqlite3.connect
+    monkeypatch.setattr("extraction_api.app.sqlite3.connect",
+                        lambda *args, **kwargs: connect(*args, **{**kwargs, "timeout": 0}))
+    headers = {"idempotency-key": "commit-contention"}
+    payload = {"text": "Cannot log into my account"}
+    with connect(path) as reader:
+        reader.execute("BEGIN")
+        reader.execute("SELECT * FROM requests").fetchall()
+        response = client.post("/extract", headers=headers, json=payload)
+        assert response.status_code == 503
+        assert response.json() == {"detail": "database temporarily busy"}
+        assert response.headers["retry-after"] == "1"
+        extractor.assert_called_once()
+    with connect(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 0
+    assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
+    assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
+    assert extractor.call_count == 2

@@ -83,25 +83,25 @@ def create_app(extractor: Callable[[str], Ticket] = extract_live, db_path: str |
                 x_api_key.encode(), expected.encode())):
             raise HTTPException(401, "invalid API key")
         digest = hashlib.sha256(request.text.encode()).hexdigest()
-        with sqlite3.connect(path, timeout=10) as db:
-            try:
+        try:
+            with sqlite3.connect(path, timeout=10) as db:
                 db.execute("BEGIN IMMEDIATE")
-            except sqlite3.OperationalError as exc:
-                if exc.sqlite_errorcode & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
-                    raise HTTPException(503, "database temporarily busy",
-                                        headers={"Retry-After": "1"}) from exc
-                raise
-            row = db.execute("SELECT digest,result FROM requests WHERE key=?", (idempotency_key,)).fetchone()
-            if row:
-                if row[0] != digest:
-                    raise HTTPException(409, "idempotency key reused for a different request")
-                return Ticket.model_validate_json(row[1])
-            try:
-                result = Ticket.model_validate(extractor(request.text).model_dump())
-            except Exception as exc:
-                raise HTTPException(503, "extraction unavailable") from exc
-            db.execute("INSERT INTO requests VALUES (?,?,?)", (idempotency_key, digest, result.model_dump_json()))
-            return result
+                row = db.execute("SELECT digest,result FROM requests WHERE key=?", (idempotency_key,)).fetchone()
+                if row:
+                    if row[0] != digest:
+                        raise HTTPException(409, "idempotency key reused for a different request")
+                    return Ticket.model_validate_json(row[1])
+                try:
+                    result = Ticket.model_validate(extractor(request.text).model_dump())
+                except Exception as exc:
+                    raise HTTPException(503, "extraction unavailable") from exc
+                db.execute("INSERT INTO requests VALUES (?,?,?)", (idempotency_key, digest, result.model_dump_json()))
+                return result
+        except sqlite3.OperationalError as exc:
+            if exc.sqlite_errorcode & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+                raise HTTPException(503, "database temporarily busy",
+                                    headers={"Retry-After": "1"}) from exc
+            raise
 
     return app
 

@@ -29,7 +29,7 @@ curl -X POST localhost:8001/extract -H 'content-type: application/json' \
 
 Use the same key and body to see the cached result. Use the same key and different body to see HTTP 409. `PORTFOLIO_DB` controls the database location.
 
-If SQLite cannot acquire the write lock within its timeout, the API returns HTTP 503 with `Retry-After: 1`. Retry with the same key and body; the extractor has not been called for that request.
+If SQLite cannot acquire the write lock or commit within its timeout, the API returns HTTP 503 with `Retry-After: 1`. Retry with the same key and body. Lock acquisition failures do not call the extractor; commit failures roll back the cached result and may require extraction again.
 
 ## Trade-offs, limitations, and next production steps
 
