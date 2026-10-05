@@ -185,6 +185,7 @@ def test_live_extraction_retries_are_bounded(monkeypatch, error_type, recover):
     factory.assert_called_once_with(timeout=15, max_retries=0)
     assert client.responses.parse.call_count == 3
     assert delays == [0.25, 0.5]
+    client.close.assert_called_once_with()
 
 
 @pytest.mark.parametrize("outcome", [ValueError("invalid provider output"),
@@ -199,6 +200,7 @@ def test_live_extraction_does_not_retry_invalid_output(monkeypatch, outcome):
         extract_live("Cannot log into my account")
     assert client.responses.parse.call_count == 1
     assert delays == []
+    client.close.assert_called_once_with()
 
 
 def test_cached_extraction_survives_app_restart(tmp_path, monkeypatch):
