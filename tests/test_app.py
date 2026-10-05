@@ -12,6 +12,17 @@ from openai import APIConnectionError, APITimeoutError, RateLimitError
 from extraction_api.app import Ticket, create_app, extract_live
 
 
+def test_ticket_categories_are_enumerated_in_api_schema(tmp_path):
+    app = create_app(db_path=str(tmp_path / "extract.db"))
+    category = app.openapi()["components"]["schemas"]["Ticket"]["properties"]["category"]
+    assert category["enum"] == ["billing", "technical", "account", "other"]
+    for value in category["enum"]:
+        ticket = Ticket(category=value, urgency=1, summary="Support requested", needs_human=True)
+        assert ticket.model_dump()["category"] == value
+    with pytest.raises(ValueError):
+        Ticket(category="unsupported", urgency=1, summary="Support requested", needs_human=True)
+
+
 def test_database_contention_is_retryable_without_extraction(tmp_path, monkeypatch):
     monkeypatch.delenv("PORTFOLIO_API_KEY", raising=False)
     path = tmp_path / "extract.db"

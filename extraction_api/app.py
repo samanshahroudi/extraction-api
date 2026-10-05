@@ -9,6 +9,7 @@ import time
 from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException
 from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
@@ -16,7 +17,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class Ticket(BaseModel):
-    category: str = Field(pattern="^(billing|technical|account|other)$")
+    category: Literal["billing", "technical", "account", "other"]
     urgency: int = Field(ge=1, le=5)
     summary: str = Field(min_length=5, max_length=300)
     needs_human: bool
