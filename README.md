@@ -6,7 +6,7 @@ Support teams receive free-form messages but downstream systems need a small, st
 
 ## Architecture and how it works
 
-`POST /extract` validates the input, checks an idempotency key in SQLite, sends the text to the OpenAI Responses API with a Pydantic output schema, validates the result, and commits it. The transaction serializes requests with the same key. Transient network/rate failures get bounded exponential retries. A health endpoint stays independent of the model provider.
+`POST /extract` validates the input, checks an idempotency key in SQLite, sends the text to the OpenAI Responses API with a Pydantic output schema, validates the result, and commits it. The transaction serializes requests with the same key. Transient network, rate-limit, and provider server failures get bounded exponential retries (three attempts total). A health endpoint stays independent of the model provider.
 
 `HTTP request → validation → idempotency lookup → Responses API → Pydantic result → SQLite → response`
 

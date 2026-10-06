@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException
-from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
+from openai import APIConnectionError, APITimeoutError, InternalServerError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -59,7 +59,7 @@ def extract_live(text: str) -> Ticket:
                 if response.output_parsed is None:
                     raise ValueError("model returned no structured output")
                 return response.output_parsed
-            except (RateLimitError, APITimeoutError, APIConnectionError) as exc:
+            except (RateLimitError, APITimeoutError, APIConnectionError, InternalServerError) as exc:
                 last_error = exc
                 if attempt < 2:
                     time.sleep(0.25 * 2**attempt)

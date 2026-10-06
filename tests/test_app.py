@@ -7,7 +7,14 @@ from unittest.mock import Mock
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from openai import APIConnectionError, APITimeoutError, RateLimitError
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AuthenticationError,
+    BadRequestError,
+    InternalServerError,
+    RateLimitError,
+)
 
 from extraction_api.app import Ticket, create_app, extract_live
 
@@ -171,12 +178,15 @@ def test_blank_idempotency_key_is_rejected_before_extraction(tmp_path, monkeypat
     assert calls == [payload["text"]]
 
 
-@pytest.mark.parametrize("error_type", [APIConnectionError, APITimeoutError, RateLimitError])
+@pytest.mark.parametrize("error_type", [APIConnectionError, APITimeoutError, RateLimitError,
+                                      InternalServerError])
 @pytest.mark.parametrize("recover", [False, True])
 def test_live_extraction_retries_are_bounded(monkeypatch, error_type, recover):
     request = httpx.Request("POST", "https://provider.example.test/responses")
-    if error_type is RateLimitError:
-        error = error_type("rate limited", response=httpx.Response(429, request=request), body=None)
+    if error_type in (RateLimitError, InternalServerError):
+        status = 429 if error_type is RateLimitError else 503
+        error = error_type("temporarily unavailable",
+                           response=httpx.Response(status, request=request), body=None)
     else:
         error = error_type(request=request)
     ticket = Ticket(category="technical", urgency=3, summary="Cannot log in", needs_human=True)
@@ -328,3 +338,20 @@ def test_connections_close_after_success_cache_conflict_and_failure(tmp_path, mo
     for connection in connections:
         with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
             connection.execute("SELECT 1")
+
+
+@pytest.mark.parametrize("status,error_type", [(400, BadRequestError), (401, AuthenticationError)])
+def test_live_extraction_does_not_retry_permanent_provider_errors(monkeypatch, status, error_type):
+    request = httpx.Request("POST", "https://provider.example.test/responses")
+    error = error_type("permanent failure", response=httpx.Response(status, request=request), body=None)
+    client = Mock()
+    client.responses.parse.side_effect = error
+    monkeypatch.setattr("extraction_api.app.OpenAI", Mock(return_value=client))
+    delays = []
+    monkeypatch.setattr("extraction_api.app.time.sleep", delays.append)
+    with pytest.raises(error_type) as exc:
+        extract_live("Cannot log into my account")
+    assert exc.value is error
+    assert client.responses.parse.call_count == 1
+    assert delays == []
+    client.close.assert_called_once_with()
