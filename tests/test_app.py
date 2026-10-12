@@ -355,3 +355,29 @@ def test_live_extraction_does_not_retry_permanent_provider_errors(monkeypatch, s
     assert client.responses.parse.call_count == 1
     assert delays == []
     client.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize("supplied", [None, "old-key", "wrong-key"])
+def test_cached_results_require_current_api_key(tmp_path, monkeypatch, supplied):
+    monkeypatch.setenv("PORTFOLIO_API_KEY", "old-key")
+    ticket = Ticket(category="technical", urgency=3, summary="Cannot log in", needs_human=True)
+    extractor = Mock(return_value=ticket)
+    path = tmp_path / "extract.db"
+    headers = {"idempotency-key": "cached-auth-request", "x-api-key": "old-key"}
+    payload = {"text": "Cannot log into my account"}
+    with TestClient(create_app(extractor, str(path))) as client:
+        assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
+        monkeypatch.setenv("PORTFOLIO_API_KEY", "new-key")
+        headers.pop("x-api-key")
+        if supplied is not None:
+            headers["x-api-key"] = supplied
+        response = client.post("/extract", headers=headers, json=payload)
+        assert response.status_code == 401
+        assert response.json() == {"detail": "invalid API key"}
+        headers["x-api-key"] = "new-key"
+        cached = client.post("/extract", headers=headers, json=payload)
+        assert cached.status_code == 200
+        assert cached.json() == ticket.model_dump()
+    extractor.assert_called_once_with(payload["text"])
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 1
