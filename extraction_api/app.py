@@ -13,7 +13,7 @@ from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException
 from openai import APIConnectionError, APITimeoutError, InternalServerError, OpenAI, RateLimitError
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Ticket(BaseModel):
@@ -31,6 +31,8 @@ class Ticket(BaseModel):
 
 
 class Request(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     text: str = Field(min_length=10, max_length=10000)
 
     @field_validator("text")

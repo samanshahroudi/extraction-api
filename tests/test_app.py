@@ -19,6 +19,24 @@ from openai import (
 from extraction_api.app import Ticket, create_app, extract_live
 
 
+def test_unknown_request_fields_do_not_extract_or_reserve_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_API_KEY", raising=False)
+    ticket = Ticket(category="technical", urgency=3, summary="Cannot log in", needs_human=True)
+    extractor = Mock(return_value=ticket)
+    path = tmp_path / "extract.db"
+    client = TestClient(create_app(extractor, str(path)))
+    headers = {"idempotency-key": "unknown-field-request"}
+    payload = {"text": "Cannot log into my account"}
+    response = client.post("/extract", headers=headers, json={**payload, "tenant": "demo"})
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["type"] == "extra_forbidden"
+    extractor.assert_not_called()
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 0
+    assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
+    extractor.assert_called_once_with(payload["text"])
+
+
 def test_ticket_categories_are_enumerated_in_api_schema(tmp_path):
     app = create_app(db_path=str(tmp_path / "extract.db"))
     category = app.openapi()["components"]["schemas"]["Ticket"]["properties"]["category"]
