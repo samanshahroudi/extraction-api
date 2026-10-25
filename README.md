@@ -16,6 +16,8 @@ Extraction requests accept only `text`. Unknown fields return HTTP 422 before ex
 
 Extracted urgency must be an integer and `needs_human` a boolean. Coerced strings, numbers used as booleans, and booleans used as urgency are rejected as extraction failures (HTTP 503) without caching a result; the same idempotency key can be retried.
 
+Extracted tickets also reject unknown fields, so unsupported model output cannot be silently discarded and cached as a successful extraction.
+
 ## Concepts and choices
 
 FastAPI supplies an explicit HTTP contract; Pydantic supplies schema enforcement; the official OpenAI SDK supplies structured output. SQLite makes the example runnable without infrastructure. The extractor is injected into `create_app`, so tests exercise the HTTP behavior without billing an API. The source lives in `app.py`; the API tests live in `tests/test_app.py`.

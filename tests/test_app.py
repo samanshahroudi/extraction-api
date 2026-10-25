@@ -60,6 +60,25 @@ def test_unknown_request_fields_do_not_extract_or_reserve_key(tmp_path, monkeypa
     extractor.assert_called_once_with(payload["text"])
 
 
+def test_unknown_ticket_fields_are_not_cached(tmp_path, monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_API_KEY", raising=False)
+    ticket = Ticket(category="technical", urgency=3, summary="Cannot log in", needs_human=True)
+    malformed = SimpleNamespace(model_dump=lambda: {**ticket.model_dump(), "resolved": True})
+    extractor = Mock(side_effect=[malformed, ticket])
+    path = tmp_path / "extract.db"
+    client = TestClient(create_app(extractor, str(path)))
+    headers = {"idempotency-key": "unknown-ticket-field"}
+    payload = {"text": "Cannot log into my account"}
+    response = client.post("/extract", headers=headers, json=payload)
+    assert response.status_code == 503
+    assert response.json() == {"detail": "extraction unavailable"}
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 0
+    assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
+    assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
+    assert extractor.call_count == 2
+
+
 def test_ticket_categories_are_enumerated_in_api_schema(tmp_path):
     app = create_app(db_path=str(tmp_path / "extract.db"))
     category = app.openapi()["components"]["schemas"]["Ticket"]["properties"]["category"]
