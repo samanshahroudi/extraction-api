@@ -18,9 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class Ticket(BaseModel):
     category: Literal["billing", "technical", "account", "other"]
-    urgency: int = Field(ge=1, le=5)
+    urgency: int = Field(ge=1, le=5, strict=True)
     summary: str = Field(min_length=5, max_length=300)
-    needs_human: bool
+    needs_human: bool = Field(strict=True)
 
     @field_validator("summary")
     @classmethod

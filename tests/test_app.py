@@ -19,6 +19,29 @@ from openai import (
 from extraction_api.app import Ticket, create_app, extract_live
 
 
+@pytest.mark.parametrize("field,value", [
+    ("urgency", True), ("urgency", "3"), ("urgency", 3.0),
+    ("needs_human", "false"), ("needs_human", 0), ("needs_human", 1),
+])
+def test_coerced_ticket_values_are_not_cached(tmp_path, monkeypatch, field, value):
+    monkeypatch.delenv("PORTFOLIO_API_KEY", raising=False)
+    ticket = Ticket(category="technical", urgency=3, summary="Cannot log in", needs_human=True)
+    malformed = SimpleNamespace(model_dump=lambda: {**ticket.model_dump(), field: value})
+    extractor = Mock(side_effect=[malformed, ticket])
+    path = tmp_path / "extract.db"
+    client = TestClient(create_app(extractor, str(path)))
+    headers = {"idempotency-key": "strict-ticket-request"}
+    payload = {"text": "Cannot log into my account"}
+    response = client.post("/extract", headers=headers, json=payload)
+    assert response.status_code == 503
+    assert response.json() == {"detail": "extraction unavailable"}
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 0
+    assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
+    assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
+    assert extractor.call_count == 2
+
+
 def test_unknown_request_fields_do_not_extract_or_reserve_key(tmp_path, monkeypatch):
     monkeypatch.delenv("PORTFOLIO_API_KEY", raising=False)
     ticket = Ticket(category="technical", urgency=3, summary="Cannot log in", needs_human=True)
