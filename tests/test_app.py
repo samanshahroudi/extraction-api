@@ -344,6 +344,30 @@ def test_invalid_api_key_does_not_extract_or_reserve_key(tmp_path, monkeypatch, 
     extractor.assert_called_once()
 
 
+@pytest.mark.parametrize("supplied", [None, "wrong-key", "original-key"])
+def test_cached_results_require_current_api_key(tmp_path, monkeypatch, supplied):
+    monkeypatch.setenv("PORTFOLIO_API_KEY", "original-key")
+    ticket = Ticket(category="other", urgency=1, summary="Support requested", needs_human=True)
+    extractor = Mock(return_value=ticket)
+    client = TestClient(create_app(extractor, str(tmp_path / "extract.db")))
+    headers = {"idempotency-key": "cached-auth-request", "x-api-key": "original-key"}
+    payload = {"text": "Please help with my account"}
+    assert client.post("/extract", headers=headers, json=payload).json() == ticket.model_dump()
+
+    monkeypatch.setenv("PORTFOLIO_API_KEY", "rotated-key")
+    headers.pop("x-api-key")
+    if supplied is not None:
+        headers["x-api-key"] = supplied
+    rejected = client.post("/extract", headers=headers, json=payload)
+    assert rejected.status_code == 401
+    assert rejected.json() == {"detail": "invalid API key"}
+    headers["x-api-key"] = "rotated-key"
+    cached = client.post("/extract", headers=headers, json=payload)
+    assert cached.status_code == 200
+    assert cached.json() == ticket.model_dump()
+    extractor.assert_called_once_with(payload["text"])
+
+
 def test_commit_contention_is_retryable_and_rolls_back(tmp_path, monkeypatch):
     monkeypatch.delenv("PORTFOLIO_API_KEY", raising=False)
     path = tmp_path / "extract.db"
